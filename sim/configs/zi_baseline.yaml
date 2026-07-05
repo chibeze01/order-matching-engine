@@ -1,0 +1,7 @@
+# Zero-intelligence baseline order-flow config (placeholder).
+#
+# TODO(M3 / SPA-11+): populate with real ZI parameters (arrival rates, size
+# distribution, price offset distribution, cancel rate). This file only exists
+# so the sim/configs directory and its intended shape are visible from SPA-1.
+name: zi_baseline
+seed: 42

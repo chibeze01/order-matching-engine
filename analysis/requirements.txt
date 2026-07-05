@@ -1,0 +1,6 @@
+# Python analysis stack for stylised-facts work (M3). Unpinned for now; pin
+# once the notebooks stabilise.
+numpy
+pandas
+matplotlib
+jupyter
