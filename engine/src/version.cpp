@@ -1,4 +1,4 @@
-#include "ome/types.hpp"
+#include "ome/version.hpp"
 
 namespace ome {
 
