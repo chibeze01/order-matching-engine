@@ -1,0 +1,9 @@
+#ifndef ORDER_MATCHING_ENGINE_SIDE_HPP
+#define ORDER_MATCHING_ENGINE_SIDE_HPP
+
+enum class Side {
+    Buy,
+    Sell
+};
+
+#endif // ORDER_MATCHING_ENGINE_SIDE_HPP

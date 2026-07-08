@@ -38,9 +38,11 @@ FetchContent_Declare(
     GIT_TAG v1.9.1
     GIT_SHALLOW ON)
 
-# Engine core. Static library today, one placeholder translation unit so the
-# target links from commit one. Real types land in SPA-2.
-add_library(ome_core STATIC engine/src/version.cpp)
+# Engine core. Static library with types and core logic.
+add_library(ome_core STATIC
+    engine/src/version.cpp
+    engine/include/ome/types/price.cpp
+    engine/include/ome/types/price_quantity_math.cpp)
 target_include_directories(ome_core PUBLIC engine/include)
 target_compile_features(ome_core PUBLIC cxx_std_20)
 
@@ -48,7 +50,7 @@ if(OME_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
     include(GoogleTest)
-    add_executable(ome_core_tests engine/tests/test_smoke.cpp)
+    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp)
     target_link_libraries(ome_core_tests PRIVATE ome_core GTest::gtest_main)
     gtest_discover_tests(ome_core_tests)
 endif()
