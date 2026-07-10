@@ -7,7 +7,7 @@ Price::Price(const Ticks ticks_, const TickSize tick_size_) : ticks(ticks_), tic
     }
 }
 
-Price Price::fromDecimal(const std::string& decimal, TickSize tick_size_) {
+Price Price::fromDecimal(const std::string &decimal, TickSize tick_size_) {
     std::string digits;
     int decimal_pos = -1;
 
@@ -39,13 +39,9 @@ Price Price::fromDecimal(const std::string& decimal, TickSize tick_size_) {
     return Price(Ticks(ticks_value), tick_size_);
 }
 
-Ticks Price::getTicks() const {
-    return ticks;
-}
+Ticks Price::getTicks() const { return ticks; }
 
-TickSize Price::getTickSize() const {
-    return tick_size;
-}
+TickSize Price::getTickSize() const { return tick_size; }
 
 std::string Price::toDecimal() const {
     std::string s = std::to_string(ticks.getValue());
@@ -61,14 +57,14 @@ std::string Price::toDecimal() const {
     return s;
 }
 
-Price Price::operator+(const Price& other) const {
+Price Price::operator+(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot add prices with different tick sizes");
     }
     return Price(ticks + other.ticks, tick_size);
 }
 
-Price Price::operator-(const Price& other) const {
+Price Price::operator-(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot subtract prices with different tick sizes");
     }
@@ -79,38 +75,34 @@ Price Price::operator-(const Price& other) const {
     return Price(result, tick_size);
 }
 
-bool Price::operator<(const Price& other) const {
+bool Price::operator<(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot compare prices with different tick sizes");
     }
     return ticks < other.ticks;
 }
 
-bool Price::operator<=(const Price& other) const {
+bool Price::operator<=(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot compare prices with different tick sizes");
     }
     return ticks <= other.ticks;
 }
 
-bool Price::operator>(const Price& other) const {
+bool Price::operator>(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot compare prices with different tick sizes");
     }
     return ticks > other.ticks;
 }
 
-bool Price::operator>=(const Price& other) const {
+bool Price::operator>=(const Price &other) const {
     if (tick_size.getValue() != other.tick_size.getValue()) {
         throw std::invalid_argument("Cannot compare prices with different tick sizes");
     }
     return ticks >= other.ticks;
 }
 
-bool Price::operator==(const Price& other) const {
-    return ticks == other.ticks && tick_size == other.tick_size;
-}
+bool Price::operator==(const Price &other) const { return ticks == other.ticks && tick_size == other.tick_size; }
 
-bool Price::operator!=(const Price& other) const {
-    return !(*this == other);
-}
+bool Price::operator!=(const Price &other) const { return !(*this == other); }

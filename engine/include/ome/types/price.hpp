@@ -1,31 +1,31 @@
 #ifndef ORDER_MATCHING_ENGINE_PRICE_HPP
 #define ORDER_MATCHING_ENGINE_PRICE_HPP
 
-#include "ticks.hpp"
 #include "tick_size.hpp"
+#include "ticks.hpp"
 #include <string>
 
 class Price {
-public:
+  public:
     Price(Ticks ticks_, TickSize tick_size_);
 
-    static Price fromDecimal(const std::string& decimal, TickSize tick_size_);
+    static Price fromDecimal(const std::string &decimal, TickSize tick_size_);
 
     Ticks getTicks() const;
     TickSize getTickSize() const;
     std::string toDecimal() const;
 
-    Price operator+(const Price& other) const;
-    Price operator-(const Price& other) const;
+    Price operator+(const Price &other) const;
+    Price operator-(const Price &other) const;
 
-    bool operator<(const Price& other) const;
-    bool operator<=(const Price& other) const;
-    bool operator>(const Price& other) const;
-    bool operator>=(const Price& other) const;
-    bool operator==(const Price& other) const;
-    bool operator!=(const Price& other) const;
+    bool operator<(const Price &other) const;
+    bool operator<=(const Price &other) const;
+    bool operator>(const Price &other) const;
+    bool operator>=(const Price &other) const;
+    bool operator==(const Price &other) const;
+    bool operator!=(const Price &other) const;
 
-private:
+  private:
     Ticks ticks;
     TickSize tick_size;
 };
