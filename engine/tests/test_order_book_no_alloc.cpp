@@ -36,18 +36,49 @@ std::size_t allocation_count = 0;
 
 #if OME_ALLOC_COUNTING
 
-void *operator new(const std::size_t size) {
+// The full replacement set (plain, nothrow, array) must be provided together:
+// with only a partial set, an allocation through an unreplaced form (gtest uses
+// nothrow new for its temporary sort buffer) gets freed by a replaced delete,
+// and ASan aborts with alloc-dealloc-mismatch.
+
+namespace {
+void *countingAllocate(const std::size_t size) noexcept {
     ++allocation_count;
-    void *ptr = std::malloc(size);
+    return std::malloc(size == 0 ? 1 : size);
+}
+} // namespace
+
+void *operator new(const std::size_t size) {
+    void *ptr = countingAllocate(size);
     if (ptr == nullptr) {
         throw std::bad_alloc();
     }
     return ptr;
 }
 
+void *operator new[](const std::size_t size) {
+    void *ptr = countingAllocate(size);
+    if (ptr == nullptr) {
+        throw std::bad_alloc();
+    }
+    return ptr;
+}
+
+void *operator new(const std::size_t size, const std::nothrow_t & /*tag*/) noexcept { return countingAllocate(size); }
+
+void *operator new[](const std::size_t size, const std::nothrow_t & /*tag*/) noexcept { return countingAllocate(size); }
+
 void operator delete(void *ptr) noexcept { std::free(ptr); }
 
+void operator delete[](void *ptr) noexcept { std::free(ptr); }
+
 void operator delete(void *ptr, std::size_t) noexcept { std::free(ptr); }
+
+void operator delete[](void *ptr, std::size_t) noexcept { std::free(ptr); }
+
+void operator delete(void *ptr, const std::nothrow_t & /*tag*/) noexcept { std::free(ptr); }
+
+void operator delete[](void *ptr, const std::nothrow_t & /*tag*/) noexcept { std::free(ptr); }
 
 #endif // OME_ALLOC_COUNTING
 
