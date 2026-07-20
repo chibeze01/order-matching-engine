@@ -39,4 +39,11 @@ Cancels are O(1). Real order flow is cancel-dominated, so cancel cost sits on th
 hot path far more than fills do. Every resting order carries a handle straight to
 its node in its price level, so removal is a constant-time unlink with no search.
 
-TODO(SPA-4+): document the handle map and the intrusive list layout.
+The cancel index is a hash map from order id to node pointer: open addressing
+with linear probing into a power-of-two table sized at construction to at least
+twice the pool capacity, so load never exceeds 50% and no rehash can happen on
+the hot path. Deletion uses backward shift rather than tombstones, so probe
+chains stay short no matter how long the insert/cancel churn runs. The nodes
+themselves are intrusive: prev/next links live inside the pooled order node, so
+unlinking touches no other structure and frees no memory — the node just goes
+back on the pool's free list.

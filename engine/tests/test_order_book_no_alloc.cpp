@@ -123,7 +123,8 @@ TEST(OrderBookNoAlloc, HotPathDoesNotAllocate) {
 
     OrderNode *reused = book.insert(makeOrder(7, 150, 70, Side::Buy)); // from free list
     book.remove(reused);
-    book.remove(bid_low);
+    const bool cancel_ok = book.cancel(OrderId(4)); // cancel-by-id path
+    const bool double_cancel_rejected = !book.cancel(OrderId(4));
     book.remove(ask_a);
     const bool emptied = book.size() == 0 && !book.bestBid().has_value() && !book.bestAsk().has_value();
 
@@ -131,6 +132,7 @@ TEST(OrderBookNoAlloc, HotPathDoesNotAllocate) {
 
     EXPECT_EQ(allocations_after, allocations_before);
     EXPECT_NE(bid_a, nullptr);
+    EXPECT_NE(bid_low, nullptr);
     EXPECT_NE(reused, nullptr);
     EXPECT_EQ(rejected, nullptr);
     EXPECT_TRUE(best_ok);
@@ -138,6 +140,8 @@ TEST(OrderBookNoAlloc, HotPathDoesNotAllocate) {
     EXPECT_EQ(level_quantity, 60U);
     EXPECT_EQ(level_count, 3U);
     EXPECT_TRUE(bid_fell_back);
+    EXPECT_TRUE(cancel_ok);
+    EXPECT_TRUE(double_cancel_rejected);
     EXPECT_TRUE(emptied);
 }
 

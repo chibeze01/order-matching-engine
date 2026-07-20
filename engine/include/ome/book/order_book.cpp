@@ -1,5 +1,6 @@
 #include "order_book.hpp"
 
+#include <bit>
 #include <stdexcept>
 
 OrderBook::OrderBook(const Ticks min_tick_, const Ticks max_tick_, const std::size_t capacity_)
@@ -23,11 +24,19 @@ OrderBook::OrderBook(const Ticks min_tick_, const Ticks max_tick_, const std::si
         node_storage[i].next = &node_storage[i + 1];
     }
     free_head = &node_storage[0];
+
+    const std::size_t table_size = std::bit_ceil(capacity_ * 2);
+    handle_map.resize(table_size);
+    handle_mask = table_size - 1;
+    handle_shift = 64U - static_cast<unsigned>(std::countr_zero(table_size));
 }
 
 OrderNode *OrderBook::insert(const Order &order) {
     const int64_t ticks = order.price.getTicks().getValue();
     if (!inBand(ticks)) { // reject before allocating so out-of-band inserts never consume a node
+        return nullptr;
+    }
+    if (handleFind(order.id.getValue()) != NOT_FOUND) { // duplicate id would corrupt the cancel index
         return nullptr;
     }
     OrderNode *node = allocateNode();
@@ -64,10 +73,27 @@ OrderNode *OrderBook::insert(const Order &order) {
             best_ask_index = index;
         }
     }
+    handleInsert(node->order_id, node);
     return node;
 }
 
 void OrderBook::remove(OrderNode *handle) {
+    handleErase(handleFind(handle->order_id));
+    unlinkAndRelease(handle);
+}
+
+bool OrderBook::cancel(const OrderId id) {
+    const std::size_t slot = handleFind(id.getValue());
+    if (slot == NOT_FOUND) {
+        return false;
+    }
+    OrderNode *node = handle_map[slot].node;
+    handleErase(slot);
+    unlinkAndRelease(node);
+    return true;
+}
+
+void OrderBook::unlinkAndRelease(OrderNode *handle) {
     const std::size_t index = indexOf(handle->price_ticks);
     Level &level = ladder(handle->side)[index];
 
@@ -144,6 +170,48 @@ OrderNode *OrderBook::allocateNode() {
 void OrderBook::releaseNode(OrderNode *node) {
     node->next = free_head;
     free_head = node;
+}
+
+std::size_t OrderBook::handleHome(const uint64_t order_id) const {
+    // Fibonacci hashing: multiply spreads ids, top bits index the table.
+    return static_cast<std::size_t>((order_id * 0x9E3779B97F4A7C15ULL) >> handle_shift);
+}
+
+std::size_t OrderBook::handleFind(const uint64_t order_id) const {
+    std::size_t probe = handleHome(order_id);
+    while (handle_map[probe].node != nullptr) {
+        if (handle_map[probe].order_id == order_id) {
+            return probe;
+        }
+        probe = (probe + 1) & handle_mask;
+    }
+    return NOT_FOUND;
+}
+
+void OrderBook::handleInsert(const uint64_t order_id, OrderNode *node) {
+    std::size_t probe = handleHome(order_id);
+    while (handle_map[probe].node != nullptr) {
+        probe = (probe + 1) & handle_mask;
+    }
+    handle_map[probe].order_id = order_id;
+    handle_map[probe].node = node;
+}
+
+void OrderBook::handleErase(const std::size_t index) {
+    // Backward-shift deletion: keeps probe chains contiguous without
+    // tombstones, so lookups never degrade over long insert/cancel churn.
+    handle_map[index].node = nullptr;
+    std::size_t hole = index;
+    std::size_t probe = (index + 1) & handle_mask;
+    while (handle_map[probe].node != nullptr) {
+        const std::size_t home = handleHome(handle_map[probe].order_id);
+        if (((probe - home) & handle_mask) >= ((probe - hole) & handle_mask)) {
+            handle_map[hole] = handle_map[probe];
+            handle_map[probe].node = nullptr;
+            hole = probe;
+        }
+        probe = (probe + 1) & handle_mask;
+    }
 }
 
 void OrderBook::refreshBestAfterEmpty(const Side side, const std::size_t emptied_index) {

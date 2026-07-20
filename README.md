@@ -45,9 +45,10 @@ See [docs/design-decisions.md](docs/design-decisions.md) for the full reasoning.
   comparisons and price-time ordering stay exact.
 - **Price-time priority.** Match best price first, then arrival order within a
   level, matching how real continuous auctions work.
-- **O(1) cancels.** Real flow is cancel-dominated, so cancels sit on the hot
-  path. Every resting order holds a handle to its node and unlinks in constant
-  time.
+- **O(1) cancels.** Real flow is cancel-dominated (often 90%+ of messages), so
+  cancels sit on the hot path. A reserve-ahead open-addressing index maps order
+  id straight to its intrusive node, which unlinks in constant time with no
+  rehash and no allocation.
 - **Single-writer engine thread.** One thread owns the book, which keeps the hot
   path lock-free and the ordering deterministic.
 - **Contract-frozen event stream.** The wire format is frozen once (SPA-10) and
