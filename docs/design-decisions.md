@@ -23,7 +23,15 @@ Orders match by best price first, then by arrival time within a price level.
 This is the standard continuous-auction rule real venues use, so simulated flow
 behaves the way microstructure results expect.
 
-TODO(SPA-3+): document the level and queue data structures.
+The book keeps one contiguous ladder of price levels per side, indexed by tick
+offset within a fixed inclusive band set at construction — array indexing beats
+tree lookups for the hot levels. Each level is an intrusive doubly-linked FIFO
+queue whose nodes come from a pool preallocated at construction, so the hot
+path never touches the heap. Best bid and best ask are cached level indices
+kept current incrementally, with a directional scan only when the best level
+empties. Inserts outside the band or beyond pool capacity are rejected with a
+null handle rather than an exception; the matching engine turns that into a
+reject on its own terms.
 
 ## O(1) cancels
 
