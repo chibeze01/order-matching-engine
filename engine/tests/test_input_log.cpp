@@ -33,6 +33,11 @@ Command cancelCommand(const uint64_t id) {
     return c;
 }
 
+// Opens and immediately closes a log, leaving a file with a header and no
+// records. Written as a helper rather than a bare scope block because
+// clang-format 18 and 22 disagree on how to lay that block out.
+void writeHeaderOnlyLog(const std::string &path) { LogWriter writer(path, makeHeader()); }
+
 // Removes the log and any rotated parts when the test scope exits, so a
 // failing assertion cannot leave stray files behind for the next run.
 struct LogFileGuard {
@@ -146,9 +151,7 @@ TEST(InputLog, TruncatedRecordIsRejectedNotTreatedAsEndOfLog) {
 TEST(InputLog, HeaderOnlyLogReadsAsCleanEndOfLog) {
     const std::string path = "test_input_log_empty.log";
     const LogFileGuard guard{path};
-    {
-        LogWriter writer(path, makeHeader());
-    }
+    writeHeaderOnlyLog(path);
 
     LogReader reader(path);
     Command c;
