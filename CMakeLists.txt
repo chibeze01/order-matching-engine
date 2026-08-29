@@ -43,15 +43,24 @@ add_library(ome_core STATIC
         engine/src/version.cpp
         engine/include/ome/types/price.cpp
         engine/include/ome/types/price_quantity_math.cpp
-        engine/include/ome/book/order_book.cpp)
+        engine/include/ome/book/order_book.cpp
+        engine/include/ome/replay/log_format.cpp
+        engine/include/ome/replay/log_writer.cpp
+        engine/include/ome/replay/log_reader.cpp
+        engine/include/ome/replay/replay_engine.cpp)
 target_include_directories(ome_core PUBLIC engine/include)
 target_compile_features(ome_core PUBLIC cxx_std_20)
+
+# Replay CLI: feeds an input log through the engine and prints a book state
+# hash (or, given two logs, the first sequence number where they diverge).
+add_executable(ome_replay engine/tools/replay_cli.cpp)
+target_link_libraries(ome_replay PRIVATE ome_core)
 
 if (OME_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
     include(GoogleTest)
-    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp)
+    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp)
     target_link_libraries(ome_core_tests PRIVATE ome_core GTest::gtest_main)
     gtest_discover_tests(ome_core_tests)
 endif ()

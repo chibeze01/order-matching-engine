@@ -47,3 +47,32 @@ chains stay short no matter how long the insert/cancel churn runs. The nodes
 themselves are intrusive: prev/next links live inside the pooled order node, so
 unlinking touches no other structure and frees no memory — the node just goes
 back on the pool's free list.
+
+## Deterministic input log and replay
+
+Same input log + same seed must reproduce identical book state, every time —
+that's the debugging superpower a matching engine needs before matching gets
+complicated. Two decisions make it work:
+
+**Binary format, not the engine's C++ types.** Every command (add/cancel/modify)
+is a fixed-width, 36-byte little-endian record behind a 48-byte header
+(magic + version + book config + seed). Fields are packed byte-by-byte rather
+than memcpy'd from a C struct, so there's no struct-padding or endianness
+ambiguity for a second reader to reverse-engineer — the layout in
+`engine/include/ome/replay/log_format.hpp` is the whole contract. That's what
+lets the Python analysis tooling parse the same log without linking the
+engine.
+
+**The book-state hash is a state fingerprint, not an input checksum.** Replay
+folds an FNV-1a hash over each command's outcome — success/failure plus the
+resulting price level's quantity and order count — not just the raw command
+bytes. A bug that corrupts book state without changing the input stream still
+shows up as a hash mismatch. The fold is O(1) per command (level lookups are
+already O(1) off the cancel index), so hashing costs nothing extra at
+10M+ events.
+
+**Rotation is file-count, not a size cap.** `LogWriter` closes and reopens a
+new part (`base_path`, `base_path.1`, `base_path.2`, ...) every
+`max_records_per_file` records, each part repeating the header so it's
+independently parseable. `LogReader` streams one record at a time and follows
+parts transparently — neither side ever holds the whole log in memory.
