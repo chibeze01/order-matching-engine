@@ -46,14 +46,23 @@ struct Command {
 
 // Per-run config the OrderBook was constructed with, plus the RNG seed used
 // by whatever process generated this log (recorded for provenance; replay
-// itself only needs the concrete commands, not the seed).
+// itself only needs the concrete commands, not the seed). tick_size is
+// carried so a consumer can turn integer ticks back into decimal prices
+// without out-of-band knowledge of how the run was configured.
 struct LogHeader {
     uint32_t version = LOG_FORMAT_VERSION;
+    uint32_t tick_size = 0;
     int64_t min_tick = 0;
     int64_t max_tick = 0;
     uint64_t capacity = 0;
     uint64_t seed = 0;
 };
+
+// Outcome of trying to read one record. Truncated is distinct from EndOfLog
+// on purpose: a log cut short mid-record (crashed writer, partial flush,
+// interrupted copy) must not be mistaken for one that ended cleanly, or
+// replay silently reports a confident hash over an incomplete run.
+enum class ReadStatus { Ok, EndOfLog, Truncated };
 
 void writeLogHeader(std::ostream &out, const LogHeader &header);
 // Returns false (header left unspecified) on short read, bad magic, or
@@ -61,8 +70,6 @@ void writeLogHeader(std::ostream &out, const LogHeader &header);
 bool readLogHeader(std::istream &in, LogHeader &header);
 
 void writeCommand(std::ostream &out, const Command &command);
-// Returns false at a clean end of stream (normal end of log) or on a
-// truncated record.
-bool readCommand(std::istream &in, Command &command);
+ReadStatus readCommand(std::istream &in, Command &command);
 
 #endif // ORDER_MATCHING_ENGINE_LOG_FORMAT_HPP

@@ -64,15 +64,38 @@ lets the Python analysis tooling parse the same log without linking the
 engine.
 
 **The book-state hash is a state fingerprint, not an input checksum.** Replay
-folds an FNV-1a hash over each command's outcome — success/failure plus the
-resulting price level's quantity and order count — not just the raw command
-bytes. A bug that corrupts book state without changing the input stream still
-shows up as a hash mismatch. The fold is O(1) per command (level lookups are
-already O(1) off the cancel index), so hashing costs nothing extra at
-10M+ events.
+folds an FNV-1a hash over each command's outcome — success/failure, the
+touched price level's quantity and order count, and the book-wide best bid,
+best ask and resting count — not just the raw command bytes. The book-wide
+part is what makes it a fingerprint rather than a per-level checksum: without
+it, damage to a level nobody touched this step, or a broken best-bid/best-ask
+index, would hide until some later command happened to land on it. The fold is
+O(1) per command (level and best-quote lookups are already O(1)), so hashing
+costs nothing extra at 10M+ events.
 
 **Rotation is file-count, not a size cap.** `LogWriter` closes and reopens a
 new part (`base_path`, `base_path.1`, `base_path.2`, ...) every
 `max_records_per_file` records, each part repeating the header so it's
 independently parseable. `LogReader` streams one record at a time and follows
 parts transparently — neither side ever holds the whole log in memory.
+
+**Corruption is reported, never skipped.** A log cut short mid-record is a
+different thing from one that ended cleanly, so `readCommand` distinguishes
+them by byte count and `LogReader` throws rather than stopping quietly — a
+determinism harness that accepts a truncated log would hand back a confident
+hash for an incomplete run, which is worse than no hash at all. The same
+applies to sequence gaps and to part files whose headers disagree. On the
+write side `LogWriter` checks the stream after every record, so a disk that
+fills up part-way through a long run fails loudly instead of producing a
+silently short log. Records are still buffered rather than flushed per write —
+per-record flushing would dominate the cost at 10M+ events, and the reader's
+truncation check is what catches an interrupted writer.
+
+**A modify that cannot be re-inserted is rejected, not dropped.** Replay
+applies a modify as cancel-then-insert, so it validates the target price
+against the band *before* cancelling. Once the order is out of the book the
+re-insert can only fail on an out-of-band price — the id has just been freed
+from the cancel index and the node returned to the pool — so the up-front
+check is sufficient to guarantee the re-insert succeeds. Cancelling first and
+discovering the failure afterwards would leave the order resting at neither
+the old price nor the new one.

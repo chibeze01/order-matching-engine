@@ -21,6 +21,9 @@ void LogWriter::openNextPart() {
         throw std::runtime_error("LogWriter: failed to open " + partPath(part_index));
     }
     writeLogHeader(current_file, header);
+    if (!current_file) {
+        throw std::runtime_error("LogWriter: failed to write header to " + partPath(part_index));
+    }
     records_in_current_file = 0;
 }
 
@@ -32,6 +35,14 @@ uint64_t LogWriter::append(Command command) {
     }
     command.seq = next_seq++;
     writeCommand(current_file, command);
+    // Checking the stream flag per record is a branch on an already-hot
+    // cache line, far cheaper than the write itself. Without it a full disk
+    // part-way through a long run yields a silently short log that replays
+    // as if it ended cleanly.
+    if (!current_file) {
+        throw std::runtime_error("LogWriter: failed to write record " + std::to_string(command.seq) + " to " +
+                                 partPath(part_index));
+    }
     ++records_in_current_file;
     ++total_records;
     return command.seq;
