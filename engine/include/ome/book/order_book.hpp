@@ -2,6 +2,7 @@
 #define ORDER_MATCHING_ENGINE_ORDER_BOOK_HPP
 
 #include "ome/types/order.hpp"
+#include "ome/types/order_id.hpp"
 #include "ome/types/quantity.hpp"
 #include "ome/types/side.hpp"
 #include "ome/types/ticks.hpp"
@@ -34,13 +35,18 @@ class OrderBook {
     // min_tick_ is negative, min_tick_ > max_tick_, or capacity_ is zero.
     OrderBook(Ticks min_tick_, Ticks max_tick_, std::size_t capacity_);
 
-    // Returns the cancel handle, or nullptr if the price is outside the band
-    // or the pool is exhausted. Never throws, never allocates.
+    // Returns the cancel handle, or nullptr if the price is outside the band,
+    // the pool is exhausted, or the id is already resting (duplicate ids would
+    // corrupt the cancel index). Never throws, never allocates.
     OrderNode *insert(const Order &order);
 
-    // O(1) unlink. handle must be a live node previously returned by insert
-    // on this book.
+    // O(1) unlink; also drops the id from the cancel index. handle must be a
+    // live node previously returned by insert on this book.
     void remove(OrderNode *handle);
+
+    // Cancel by id: O(1) index lookup + unlink. Returns false if the id is not
+    // resting (unknown, already cancelled, or already removed).
+    bool cancel(OrderId id);
 
     std::optional<Ticks> bestBid() const;
     std::optional<Ticks> bestAsk() const;
@@ -61,7 +67,15 @@ class OrderBook {
         std::size_t order_count = 0;
     };
 
+    // Open-addressing slot for the id -> node cancel index. node == nullptr
+    // marks an empty slot (order ids have no reserved sentinel value).
+    struct HandleSlot {
+        uint64_t order_id = 0;
+        OrderNode *node = nullptr;
+    };
+
     static constexpr std::size_t NO_LEVEL = static_cast<std::size_t>(-1);
+    static constexpr std::size_t NOT_FOUND = static_cast<std::size_t>(-1);
 
     bool inBand(int64_t ticks) const { return ticks >= min_tick && ticks <= max_tick; }
     std::size_t indexOf(int64_t ticks) const { return static_cast<std::size_t>(ticks - min_tick); }
@@ -71,6 +85,11 @@ class OrderBook {
     OrderNode *allocateNode();
     void releaseNode(OrderNode *node);
     void refreshBestAfterEmpty(Side side, std::size_t emptied_index);
+    void unlinkAndRelease(OrderNode *node);
+    std::size_t handleHome(uint64_t order_id) const;
+    std::size_t handleFind(uint64_t order_id) const;
+    void handleInsert(uint64_t order_id, OrderNode *node);
+    void handleErase(std::size_t index);
 
     int64_t min_tick;
     int64_t max_tick;
@@ -81,6 +100,12 @@ class OrderBook {
     std::vector<OrderNode> node_storage;   // sized once in ctor, never resized (handle stability)
     OrderNode *free_head = nullptr;
     std::size_t resting_count = 0;
+    // Cancel index: linear-probe open addressing, power-of-2 table sized to at
+    // least twice the pool capacity in the ctor, so load stays <= 50% and no
+    // rehash can ever happen on the hot path.
+    std::vector<HandleSlot> handle_map;
+    std::size_t handle_mask = 0;
+    unsigned handle_shift = 0;
 };
 
 #endif // ORDER_MATCHING_ENGINE_ORDER_BOOK_HPP
