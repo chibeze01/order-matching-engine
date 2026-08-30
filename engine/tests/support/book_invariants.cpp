@@ -13,6 +13,12 @@ std::string formatOptionalTicks(const std::optional<Ticks> &value) {
     return value.has_value() ? std::to_string(value->getValue()) : "none";
 }
 
+std::string levelLabel(const std::string &field, const Side side, const Ticks price) {
+    std::ostringstream label;
+    label << field << " on " << sideName(side) << "@" << price.getValue();
+    return label.str();
+}
+
 std::vector<uint64_t> realLevelIds(const OrderBook &book, const Side side, const Ticks price) {
     std::vector<uint64_t> ids;
     for (const OrderNode *node = book.levelFront(side, price); node != nullptr; node = node->next) {
@@ -25,26 +31,33 @@ InvariantFailure makeFailure(const std::ostringstream &message, const uint64_t o
     return InvariantFailure{message.str(), op_index, seed};
 }
 
+// Shared shape behind every simple real-vs-naive equality check below: same
+// message format, only the label and the two values change.
+template <typename T>
+std::optional<InvariantFailure> compareEqual(const std::string &label, const T &real_value, const T &naive_value,
+                                             const uint64_t op_index, const uint64_t seed) {
+    if (real_value == naive_value) {
+        return std::nullopt;
+    }
+    std::ostringstream message;
+    message << label << " mismatch: real=" << real_value << " naive=" << naive_value;
+    return makeFailure(message, op_index, seed);
+}
+
 // Compares one level between the real and naive books. Returns a failure
 // describing the first mismatch found, or nullopt if the level agrees.
 std::optional<InvariantFailure> checkLevel(const OrderBook &book, const NaiveOrderBook &naive, const Side side,
                                            const Ticks price, const uint64_t op_index, const uint64_t seed) {
-    const Quantity real_quantity = book.levelQuantity(side, price);
-    const Quantity naive_quantity = naive.levelQuantity(side, price);
-    if (real_quantity != naive_quantity) {
-        std::ostringstream message;
-        message << "level quantity mismatch on " << sideName(side) << "@" << price.getValue()
-                << ": real=" << real_quantity.getValue() << " naive=" << naive_quantity.getValue();
-        return makeFailure(message, op_index, seed);
+    if (std::optional<InvariantFailure> failure =
+            compareEqual(levelLabel("level quantity", side, price), book.levelQuantity(side, price).getValue(),
+                         naive.levelQuantity(side, price).getValue(), op_index, seed)) {
+        return failure;
     }
 
-    const std::size_t real_count = book.levelOrderCount(side, price);
-    const std::size_t naive_count = naive.levelOrderCount(side, price);
-    if (real_count != naive_count) {
-        std::ostringstream message;
-        message << "level order count mismatch on " << sideName(side) << "@" << price.getValue()
-                << ": real=" << real_count << " naive=" << naive_count;
-        return makeFailure(message, op_index, seed);
+    if (std::optional<InvariantFailure> failure =
+            compareEqual(levelLabel("level order count", side, price), book.levelOrderCount(side, price),
+                         naive.levelOrderCount(side, price), op_index, seed)) {
+        return failure;
     }
 
     const std::vector<uint64_t> real_ids = realLevelIds(book, side, price);
@@ -78,35 +91,28 @@ std::optional<InvariantFailure> checkAfterOp(const OrderBook &book, const NaiveO
                                              const bool real_result, const bool naive_result,
                                              const std::optional<std::pair<Side, Ticks>> touched_level,
                                              const uint64_t op_index, const uint64_t seed) {
-    if (real_result != naive_result) {
-        std::ostringstream message;
-        message << opKindName(op.kind) << " id=" << op.order_id << " result mismatch: real=" << real_result
-                << " naive=" << naive_result;
-        return makeFailure(message, op_index, seed);
+    const std::string op_label = opKindName(op.kind) + " id=" + std::to_string(op.order_id) + " result";
+    if (std::optional<InvariantFailure> failure = compareEqual(op_label, real_result, naive_result, op_index, seed)) {
+        return failure;
     }
 
-    if (book.size() != naive.size()) {
-        std::ostringstream message;
-        message << "resting count mismatch: real=" << book.size() << " naive=" << naive.size();
-        return makeFailure(message, op_index, seed);
+    if (std::optional<InvariantFailure> failure =
+            compareEqual(std::string("resting count"), book.size(), naive.size(), op_index, seed)) {
+        return failure;
     }
 
     const std::optional<Ticks> real_bid = book.bestBid();
     const std::optional<Ticks> naive_bid = naive.bestBid();
-    if (real_bid != naive_bid) {
-        std::ostringstream message;
-        message << "best bid mismatch: real=" << formatOptionalTicks(real_bid)
-                << " naive=" << formatOptionalTicks(naive_bid);
-        return makeFailure(message, op_index, seed);
+    if (std::optional<InvariantFailure> failure = compareEqual(std::string("best bid"), formatOptionalTicks(real_bid),
+                                                               formatOptionalTicks(naive_bid), op_index, seed)) {
+        return failure;
     }
 
     const std::optional<Ticks> real_ask = book.bestAsk();
     const std::optional<Ticks> naive_ask = naive.bestAsk();
-    if (real_ask != naive_ask) {
-        std::ostringstream message;
-        message << "best ask mismatch: real=" << formatOptionalTicks(real_ask)
-                << " naive=" << formatOptionalTicks(naive_ask);
-        return makeFailure(message, op_index, seed);
+    if (std::optional<InvariantFailure> failure = compareEqual(std::string("best ask"), formatOptionalTicks(real_ask),
+                                                               formatOptionalTicks(naive_ask), op_index, seed)) {
+        return failure;
     }
 
     if (real_bid.has_value() && real_ask.has_value() && !(*real_bid < *real_ask)) {
@@ -123,10 +129,11 @@ std::optional<InvariantFailure> checkAfterOp(const OrderBook &book, const NaiveO
 }
 
 std::optional<InvariantFailure> checkFullSweep(const OrderBook &book, const NaiveOrderBook &naive,
-                                               const uint64_t op_index, const uint64_t seed) {
+                                               const int64_t band_min, const int64_t band_max, const uint64_t op_index,
+                                               const uint64_t seed) {
     for (const Side side : {Side::Buy, Side::Sell}) {
-        for (const Ticks price : naive.occupiedPrices(side)) {
-            if (std::optional<InvariantFailure> failure = checkLevel(book, naive, side, price, op_index, seed)) {
+        for (int64_t ticks = band_min; ticks <= band_max; ++ticks) {
+            if (std::optional<InvariantFailure> failure = checkLevel(book, naive, side, Ticks(ticks), op_index, seed)) {
                 return failure;
             }
         }

@@ -1,4 +1,4 @@
-#include "support/book_fuzz_runner.hpp"
+#include "book_fuzz_runner.hpp"
 
 #include <cstdint>
 #include <cstdio>

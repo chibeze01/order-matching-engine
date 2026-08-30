@@ -28,7 +28,7 @@ jobs:
         run: cmake --preset debug-asan
 
       - name: Build
-        run: cmake --build --preset debug-asan
+        run: cmake --build --preset debug-asan --target ome_book_fuzz
 
       - name: Run fuzz (1M+ ops)
         run: ./build/debug-asan/ome_book_fuzz --ops 2000000

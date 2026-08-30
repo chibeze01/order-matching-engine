@@ -31,12 +31,15 @@ std::optional<InvariantFailure> checkAfterOp(const OrderBook &book, const NaiveO
                                              std::optional<std::pair<Side, Ticks>> touched_level, uint64_t op_index,
                                              uint64_t seed);
 
-// Walks every occupied level on both sides and rechecks FIFO order and
-// aggregates -- O(resting orders). Meant to run periodically, not every op,
-// as defense-in-depth against a level nobody touched this step being
-// corrupted -- a bug checkAfterOp's touched-level-only checks wouldn't catch
-// until something later happened to land on that same level.
-std::optional<InvariantFailure> checkFullSweep(const OrderBook &book, const NaiveOrderBook &naive, uint64_t op_index,
-                                               uint64_t seed);
+// Walks every level in [band_min, band_max] on both sides and rechecks FIFO
+// order and aggregates -- O(band width), not just O(resting orders): a real
+// book that wrongly believes a naive-empty price is occupied only shows up
+// by checking prices naive has nothing at, not just the ones it does.
+// Meant to run periodically, not every op, as defense-in-depth against a
+// level nobody touched this step being corrupted -- a bug checkAfterOp's
+// touched-level-only checks wouldn't catch until something later happened
+// to land on that same level.
+std::optional<InvariantFailure> checkFullSweep(const OrderBook &book, const NaiveOrderBook &naive, int64_t band_min,
+                                               int64_t band_max, uint64_t op_index, uint64_t seed);
 
 #endif // ORDER_MATCHING_ENGINE_BOOK_INVARIANTS_HPP

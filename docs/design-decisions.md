@@ -114,9 +114,18 @@ every op, success/failure, resting count, best bid/ask, and the touched
 level's FIFO order and aggregates are asserted equal between the two —
 "cancel index consistent with book contents" cashes out to bool-for-bool
 agreement between `OrderBook::cancel` and the naive book's plain
-hash-lookup-and-erase. A full-book sweep across every occupied level runs
-periodically on top of that, as defense-in-depth against a level nobody
-touched this step getting corrupted.
+hash-lookup-and-erase. A minority of ops deliberately poke past the band
+edge or cancel via `OrderBook::remove(handle)` instead of `cancel(id)`, so
+the suite doesn't just fuzz the paths that are easy to reach by accident —
+out-of-band rejection and the pooled free-list's direct-handle removal path
+each need their own dedicated slice of ops to ever run at all.
+
+A full-book sweep runs periodically on top of the per-op checks, as
+defense-in-depth against a level nobody touched this step getting
+corrupted. It walks every tick in the book's band, not just the levels the
+naive reference currently has orders at — sweeping only naive-occupied
+levels would never notice a real-book-only bug that plants stray state at a
+price the naive side has nothing resting at.
 
 **Non-crossing by construction, not by enforcement.** `OrderBook` at this
 stage never crosses an order against the opposite side — that's M2 — so
@@ -126,7 +135,11 @@ sub-ranges of the band, bids strictly below asks, so "best bid < best ask
 when both exist" holds by construction. This keeps the suite scoped to what
 the book actually implements today (FIFO order, level aggregates,
 cancel-index consistency) instead of matching semantics that don't exist
-yet.
+yet. It also means narrowing the gap between the two sub-ranges once M2
+adds real crossing is not a config tweak: `NaiveOrderBook` has no
+match/execution logic and the invariant checks have no concept of a trade,
+so both need matching-aware rework before the suite can meaningfully cover
+a book that's allowed to cross.
 
 **Two tiers, one shared driver.** A GoogleTest property test runs 32 fixed
 seeds at a few thousand ops each on every push, cheap enough to run under

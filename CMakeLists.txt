@@ -69,7 +69,7 @@ if (OME_BUILD_TESTS)
             engine/tests/support/book_fuzz_generator.cpp
             engine/tests/support/book_invariants.cpp
             engine/tests/support/book_fuzz_runner.cpp)
-    target_include_directories(ome_fuzz_support PUBLIC engine/tests)
+    target_include_directories(ome_fuzz_support PUBLIC engine/tests/support)
     target_link_libraries(ome_fuzz_support PUBLIC ome_core)
 
     add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp)

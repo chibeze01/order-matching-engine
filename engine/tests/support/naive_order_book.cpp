@@ -31,18 +31,20 @@ bool NaiveOrderBook::cancel(const OrderId id) {
     Ladder &levels = ladder(side);
     const auto level_it = levels.find(ticks);
     std::deque<Resting> &orders = level_it->second;
+
     for (auto order_it = orders.begin(); order_it != orders.end(); ++order_it) {
-        if (order_it->order_id == id.getValue()) {
-            orders.erase(order_it);
-            break;
+        if (order_it->order_id != id.getValue()) {
+            continue;
         }
+        orders.erase(order_it);
+        if (orders.empty()) {
+            levels.erase(level_it);
+        }
+        id_location.erase(location_it);
+        --resting_count;
+        return true;
     }
-    if (orders.empty()) {
-        levels.erase(level_it);
-    }
-    id_location.erase(location_it);
-    --resting_count;
-    return true;
+    return false; // id_location and the level disagree -- report "not resting" rather than partially mutating
 }
 
 std::optional<Ticks> NaiveOrderBook::bestBid() const {
@@ -59,47 +61,40 @@ std::optional<Ticks> NaiveOrderBook::bestAsk() const {
     return Ticks(asks.begin()->first);
 }
 
-Quantity NaiveOrderBook::levelQuantity(const Side side, const Ticks price) const {
+const std::deque<NaiveOrderBook::Resting> *NaiveOrderBook::findLevel(const Side side, const int64_t ticks) const {
     const Ladder &levels = ladder(side);
-    const auto it = levels.find(price.getValue());
-    if (it == levels.end()) {
+    const auto it = levels.find(ticks);
+    return it == levels.end() ? nullptr : &it->second;
+}
+
+Quantity NaiveOrderBook::levelQuantity(const Side side, const Ticks price) const {
+    const std::deque<Resting> *level = findLevel(side, price.getValue());
+    if (level == nullptr) {
         return Quantity(0);
     }
     uint64_t total = 0;
-    for (const Resting &resting : it->second) {
+    for (const Resting &resting : *level) {
         total += resting.quantity;
     }
     return Quantity(total);
 }
 
 std::size_t NaiveOrderBook::levelOrderCount(const Side side, const Ticks price) const {
-    const Ladder &levels = ladder(side);
-    const auto it = levels.find(price.getValue());
-    return it == levels.end() ? 0 : it->second.size();
+    const std::deque<Resting> *level = findLevel(side, price.getValue());
+    return level == nullptr ? 0 : level->size();
 }
 
 std::vector<uint64_t> NaiveOrderBook::levelOrderIds(const Side side, const Ticks price) const {
     std::vector<uint64_t> ids;
-    const Ladder &levels = ladder(side);
-    const auto it = levels.find(price.getValue());
-    if (it == levels.end()) {
+    const std::deque<Resting> *level = findLevel(side, price.getValue());
+    if (level == nullptr) {
         return ids;
     }
-    ids.reserve(it->second.size());
-    for (const Resting &resting : it->second) {
+    ids.reserve(level->size());
+    for (const Resting &resting : *level) {
         ids.push_back(resting.order_id);
     }
     return ids;
-}
-
-std::vector<Ticks> NaiveOrderBook::occupiedPrices(const Side side) const {
-    std::vector<Ticks> prices;
-    const Ladder &levels = ladder(side);
-    prices.reserve(levels.size());
-    for (const auto &[price, orders] : levels) {
-        prices.push_back(Ticks(price));
-    }
-    return prices;
 }
 
 std::optional<std::pair<Side, Ticks>> NaiveOrderBook::locate(const OrderId id) const {

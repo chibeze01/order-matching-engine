@@ -37,10 +37,6 @@ class NaiveOrderBook {
     std::size_t levelOrderCount(Side side, Ticks price) const;
     std::vector<uint64_t> levelOrderIds(Side side, Ticks price) const; // FIFO front -> back
 
-    // Prices with at least one resting order, ascending. Lets a full-book
-    // sweep walk exactly the occupied levels instead of the whole band.
-    std::vector<Ticks> occupiedPrices(Side side) const;
-
     // Where a live id is currently resting, or nullopt if it isn't live.
     // OrderBook has no equivalent public query; the invariant checker needs
     // this before a cancel mutates state so it knows which level to recheck.
@@ -60,6 +56,9 @@ class NaiveOrderBook {
     bool inBand(int64_t ticks) const { return ticks >= min_tick && ticks <= max_tick; }
     Ladder &ladder(Side side) { return side == Side::Buy ? bids : asks; }
     const Ladder &ladder(Side side) const { return side == Side::Buy ? bids : asks; }
+    // Shared lookup behind levelQuantity/levelOrderCount/levelOrderIds:
+    // nullptr on a miss, the level's FIFO queue otherwise.
+    const std::deque<Resting> *findLevel(Side side, int64_t ticks) const;
 
     int64_t min_tick;
     int64_t max_tick;
