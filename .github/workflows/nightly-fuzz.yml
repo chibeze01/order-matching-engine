@@ -1,0 +1,34 @@
+name: Nightly book fuzz
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  book-fuzz:
+    name: Book invariant fuzz (debug-asan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Cache CMake build (FetchContent deps)
+        uses: actions/cache@v4
+        with:
+          path: build/debug-asan
+          key: ${{ runner.os }}-debug-asan-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: |
+            ${{ runner.os }}-debug-asan-
+
+      - name: Configure
+        run: cmake --preset debug-asan
+
+      - name: Build
+        run: cmake --build --preset debug-asan
+
+      - name: Run fuzz (1M+ ops)
+        run: ./build/debug-asan/ome_book_fuzz --ops 2000000

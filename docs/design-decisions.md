@@ -99,3 +99,40 @@ from the cancel index and the node returned to the pool — so the up-front
 check is sufficient to guarantee the re-insert succeeds. Cancelling first and
 discovering the failure afterwards would leave the order resting at neither
 the old price nor the new one.
+
+## Book invariant suite and fuzz tests
+
+M2's matching logic needs a book everyone trusts underneath it, so before
+that lands the book gets checked against a second, independent
+implementation rather than just its own unit tests. `NaiveOrderBook`
+(`engine/tests/support/naive_order_book.hpp`) rebuilds the same resting-book
+semantics from `std::map`/`std::deque`/`std::unordered_map` — no pooling, no
+open addressing — so it is obviously correct by inspection and gives
+`OrderBook`'s hot-path tricks something to disagree with if they're wrong.
+A seeded generator drives random add/cancel ops through both books; after
+every op, success/failure, resting count, best bid/ask, and the touched
+level's FIFO order and aggregates are asserted equal between the two —
+"cancel index consistent with book contents" cashes out to bool-for-bool
+agreement between `OrderBook::cancel` and the naive book's plain
+hash-lookup-and-erase. A full-book sweep across every occupied level runs
+periodically on top of that, as defense-in-depth against a level nobody
+touched this step getting corrupted.
+
+**Non-crossing by construction, not by enforcement.** `OrderBook` at this
+stage never crosses an order against the opposite side — that's M2 — so
+nothing stops a naive fuzzer from resting a buy above a resting sell. The
+generator instead draws bid prices and ask prices from two disjoint
+sub-ranges of the band, bids strictly below asks, so "best bid < best ask
+when both exist" holds by construction. This keeps the suite scoped to what
+the book actually implements today (FIFO order, level aggregates,
+cancel-index consistency) instead of matching semantics that don't exist
+yet.
+
+**Two tiers, one shared driver.** A GoogleTest property test runs 32 fixed
+seeds at a few thousand ops each on every push, cheap enough to run under
+both `debug-asan` and `release`. A standalone CLI (`ome_book_fuzz`) runs the
+same driver at 1M+ ops nightly, seeded from `std::random_device` by default
+so it explores fresh ground each run, always printing the seed first —
+`mt19937_64`'s seed-deterministic, prefix-stable stream means rerunning with
+`--seed` reproduces the exact failing sequence, so a failure doesn't need
+its own persisted log the way a production replay would.
