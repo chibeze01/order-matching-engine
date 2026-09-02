@@ -60,9 +60,26 @@ if (OME_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
     include(GoogleTest)
-    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp)
-    target_link_libraries(ome_core_tests PRIVATE ome_core GTest::gtest_main)
+
+    # Naive reference book + fuzz generator/invariants/driver (SPA-6). Shared
+    # between the gtest property test and the standalone fuzz CLI below, so
+    # it's compiled once here rather than twice.
+    add_library(ome_fuzz_support STATIC
+            engine/tests/support/naive_order_book.cpp
+            engine/tests/support/book_fuzz_generator.cpp
+            engine/tests/support/book_invariants.cpp
+            engine/tests/support/book_fuzz_runner.cpp)
+    target_include_directories(ome_fuzz_support PUBLIC engine/tests/support)
+    target_link_libraries(ome_fuzz_support PUBLIC ome_core)
+
+    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp)
+    target_link_libraries(ome_core_tests PRIVATE ome_core ome_fuzz_support GTest::gtest_main)
     gtest_discover_tests(ome_core_tests)
+
+    # Standalone fuzz runner: large-scale (1M+ op) invariant fuzzing, run
+    # nightly in CI rather than on every push (see .github/workflows/nightly-fuzz.yml).
+    add_executable(ome_book_fuzz engine/tools/book_fuzz_cli.cpp)
+    target_link_libraries(ome_book_fuzz PRIVATE ome_core ome_fuzz_support)
 endif ()
 
 if (OME_BUILD_BENCH)
