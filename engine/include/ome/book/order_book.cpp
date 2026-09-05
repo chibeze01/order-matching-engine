@@ -1,5 +1,6 @@
 #include "order_book.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <stdexcept>
 
@@ -91,6 +92,27 @@ bool OrderBook::cancel(const OrderId id) {
     handleErase(slot);
     unlinkAndRelease(node);
     return true;
+}
+
+ConsumeResult OrderBook::consumeBestFront(const Side side, const Quantity max_qty) {
+    const std::size_t index = side == Side::Buy ? best_bid_index : best_ask_index;
+    Level &level = ladder(side)[index];
+    OrderNode *front = level.head;
+
+    const uint64_t available = front->quantity;
+    const uint64_t filled = std::min(available, max_qty.getValue());
+    const ConsumeResult result{OrderId(front->order_id), Ticks(front->price_ticks), Quantity(filled),
+                                filled == available};
+
+    front->quantity -= filled;
+    level.total_quantity -= filled;
+    if (front->quantity == 0) {
+        // Same bookkeeping as cancel(): drop it from the cancel index before
+        // unlinkAndRelease returns the node to the pool.
+        handleErase(handleFind(front->order_id));
+        unlinkAndRelease(front);
+    }
+    return result;
 }
 
 void OrderBook::unlinkAndRelease(OrderNode *handle) {

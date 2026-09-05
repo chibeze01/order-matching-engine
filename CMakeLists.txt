@@ -44,6 +44,7 @@ add_library(ome_core STATIC
         engine/include/ome/types/price.cpp
         engine/include/ome/types/price_quantity_math.cpp
         engine/include/ome/book/order_book.cpp
+        engine/include/ome/matching/matching_engine.cpp
         engine/include/ome/replay/log_format.cpp
         engine/include/ome/replay/log_writer.cpp
         engine/include/ome/replay/log_reader.cpp
@@ -66,13 +67,14 @@ if (OME_BUILD_TESTS)
     # it's compiled once here rather than twice.
     add_library(ome_fuzz_support STATIC
             engine/tests/support/naive_order_book.cpp
+            engine/tests/support/naive_matcher.cpp
             engine/tests/support/book_fuzz_generator.cpp
             engine/tests/support/book_invariants.cpp
             engine/tests/support/book_fuzz_runner.cpp)
     target_include_directories(ome_fuzz_support PUBLIC engine/tests/support)
     target_link_libraries(ome_fuzz_support PUBLIC ome_core)
 
-    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp)
+    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp engine/tests/test_matching_engine.cpp)
     target_link_libraries(ome_core_tests PRIVATE ome_core ome_fuzz_support GTest::gtest_main)
     gtest_discover_tests(ome_core_tests)
 
