@@ -106,5 +106,8 @@ cmake --build --preset release
 ctest --preset release
 ```
 
+On Windows, run the `debug-asan` preset from WSL (Ubuntu). MinGW GCC ships no
+ASan/UBSan runtime, so it fails to link natively. `release` builds fine either way.
+
 Run the relevant preset before claiming a change works. `.clang-format` and
 `.clang-tidy` are enforced — match them.

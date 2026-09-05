@@ -22,10 +22,10 @@
       "name": "debug-asan",
       "inherits": "base",
       "displayName": "Debug + Address/UB sanitizers",
-      "description": "Debug build with -fsanitize=address,undefined",
+      "description": "Debug build with -fsanitize=address,undefined. UB aborts (no recover) so tests fail on it.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
     },
@@ -54,6 +54,10 @@
     {
       "name": "debug-asan",
       "configurePreset": "debug-asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_stack_use_after_return=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      },
       "output": {
         "outputOnFailure": true
       }
