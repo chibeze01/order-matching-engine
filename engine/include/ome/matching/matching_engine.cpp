@@ -4,7 +4,7 @@
 
 bool MatchingEngine::crosses(const Side taker_side, const Ticks taker_price, const Ticks resting_price) {
     return taker_side == Side::Buy ? taker_price.getValue() >= resting_price.getValue()
-                                    : taker_price.getValue() <= resting_price.getValue();
+                                   : taker_price.getValue() <= resting_price.getValue();
 }
 
 SubmitResult MatchingEngine::submitLimit(const Order &order) {

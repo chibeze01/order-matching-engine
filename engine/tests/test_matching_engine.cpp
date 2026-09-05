@@ -1,5 +1,5 @@
-#include "ome/matching/matching_engine.hpp"
 #include "ome/book/order_book.hpp"
+#include "ome/matching/matching_engine.hpp"
 #include "ome/types/order.hpp"
 
 #include "book_fuzz_generator.hpp" // Rng, boundedRand -- deterministic, cross-platform-stable draws
@@ -27,7 +27,7 @@ OrderBook makeBook(const std::size_t capacity = CAPACITY) {
 }
 
 void expectTrade(const Trade &trade, const uint64_t maker_id, const uint64_t taker_id, const int64_t price,
-                  const uint64_t qty, const Side aggressor_side) {
+                 const uint64_t qty, const Side aggressor_side) {
     EXPECT_EQ(trade.maker_id, OrderId(maker_id));
     EXPECT_EQ(trade.taker_id, OrderId(taker_id));
     EXPECT_EQ(trade.price, Ticks(price));

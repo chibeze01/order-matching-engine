@@ -102,7 +102,7 @@ ConsumeResult OrderBook::consumeBestFront(const Side side, const Quantity max_qt
     const uint64_t available = front->quantity;
     const uint64_t filled = std::min(available, max_qty.getValue());
     const ConsumeResult result{OrderId(front->order_id), Ticks(front->price_ticks), Quantity(filled),
-                                filled == available};
+                               filled == available};
 
     front->quantity -= filled;
     level.total_quantity -= filled;
