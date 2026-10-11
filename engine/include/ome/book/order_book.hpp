@@ -25,6 +25,16 @@ struct OrderNode {
     OrderNode *next = nullptr; // doubles as the free-list link when pooled
 };
 
+// Result of consumeBestFront: what got taken off the front order, and
+// whether that order left the book (fully filled) or is still resting with
+// quantity left.
+struct ConsumeResult {
+    OrderId order_id;
+    Ticks price;
+    Quantity filled;
+    bool order_fully_filled;
+};
+
 // Price ladder: one contiguous array of levels per side, indexed by tick offset
 // from min_tick, each level an intrusive doubly-linked FIFO queue. All heap
 // allocation happens in the constructor; insert/remove never allocate.
@@ -47,6 +57,14 @@ class OrderBook {
     // Cancel by id: O(1) index lookup + unlink. Returns false if the id is not
     // resting (unknown, already cancelled, or already removed).
     bool cancel(OrderId id);
+
+    // Fills up to max_qty against the front order of side's best level.
+    // Precondition: that best level is non-empty (check bestBid()/bestAsk()
+    // first) -- the matching engine only calls this while there is a level
+    // to cross against. A fully filled front order is unlinked and dropped
+    // from the cancel index same as remove(); a partial fill stays at the
+    // head of its level with its quantity reduced.
+    ConsumeResult consumeBestFront(Side side, Quantity max_qty);
 
     std::optional<Ticks> bestBid() const;
     std::optional<Ticks> bestAsk() const;

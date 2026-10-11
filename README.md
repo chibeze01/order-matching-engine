@@ -84,6 +84,9 @@ cmake --build --preset release
 ctest --preset release
 ```
 
+On Windows, run the `debug-asan` preset from WSL (Ubuntu). MinGW GCC ships no
+ASan/UBSan runtime, so it fails to link natively. `release` builds fine either way.
+
 Native tuning (`-march=native`) is off by default so CI stays portable. Turn it
 on for local release builds with `-DOME_ENABLE_NATIVE=ON`.
 
