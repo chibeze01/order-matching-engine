@@ -149,6 +149,82 @@ TEST(MatchingEngine, RemainderRejectedOutOfBandIsDistinctFromFullyFilled) {
     EXPECT_EQ(book.size(), 0U);
 }
 
+Order makeTyped(const uint64_t id, const int64_t ticks, const uint64_t qty, const Side side, const OrderType type) {
+    return Order{OrderId(id), Price(Ticks(ticks), TickSize(CENT_TICK_SIZE)), Quantity(qty), side, type};
+}
+
+TEST(MatchingEngine, SubmitLimitRestsRemainderSameAsSubmitLimit) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    book.insert(makeOrder(1, 150, 10, Side::Sell));
+
+    SubmitResult result = engine.submit(makeTyped(2, 150, 15, Side::Buy, OrderType::Limit));
+    ASSERT_EQ(result.trades.size(), 1U);
+    expectTrade(result.trades[0], 1, 2, 150, 10, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(5));
+    ASSERT_NE(result.resting, nullptr);
+    EXPECT_EQ(book.bestBid(), Ticks(150));
+}
+
+TEST(MatchingEngine, MarketIgnoresPriceSweepsAndCancelsRemainder) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    book.insert(makeOrder(1, 150, 5, Side::Sell));
+    book.insert(makeOrder(2, 160, 5, Side::Sell));
+
+    // price field 100 would cross nothing as a limit; market ignores it.
+    SubmitResult result = engine.submit(makeTyped(3, 100, 12, Side::Buy, OrderType::Market));
+    ASSERT_EQ(result.trades.size(), 2U);
+    expectTrade(result.trades[0], 1, 3, 150, 5, Side::Buy);
+    expectTrade(result.trades[1], 2, 3, 160, 5, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(2));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(book.size(), 0U); // remainder cancelled, never rests
+}
+
+TEST(MatchingEngine, IocMatchesWhatCrossesAndCancelsRemainder) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    book.insert(makeOrder(1, 150, 5, Side::Sell));
+    book.insert(makeOrder(2, 151, 5, Side::Sell));
+
+    SubmitResult result = engine.submit(makeTyped(3, 150, 8, Side::Buy, OrderType::IOC));
+    ASSERT_EQ(result.trades.size(), 1U);
+    expectTrade(result.trades[0], 1, 3, 150, 5, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(3));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(book.size(), 1U); // only the untouched 151 ask
+    EXPECT_FALSE(book.bestBid().has_value());
+}
+
+TEST(MatchingEngine, FokFillsWhenWholeQuantityCrosses) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    book.insert(makeOrder(1, 150, 5, Side::Sell));
+    book.insert(makeOrder(2, 151, 5, Side::Sell));
+
+    SubmitResult result = engine.submit(makeTyped(3, 151, 10, Side::Buy, OrderType::FOK));
+    ASSERT_EQ(result.trades.size(), 2U);
+    EXPECT_EQ(result.remaining, Quantity(0));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(book.size(), 0U);
+}
+
+TEST(MatchingEngine, FokKillLeavesBookUntouched) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    book.insert(makeOrder(1, 150, 5, Side::Sell));
+    book.insert(makeOrder(2, 151, 5, Side::Sell));
+
+    SubmitResult result = engine.submit(makeTyped(3, 151, 11, Side::Buy, OrderType::FOK)); // one lot short
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(11));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(book.size(), 2U);
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(150)), Quantity(5));
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(151)), Quantity(5));
+}
+
 // Differential test (SPA-7): a narrow price band forces heavy crossing, and
 // every submit is checked trade-for-trade against NaiveMatcher, plus the
 // resulting best bid/ask. Stops at the first divergence via ASSERT so a
