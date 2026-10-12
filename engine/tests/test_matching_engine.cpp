@@ -239,6 +239,235 @@ TEST(MatchingEngine, FokKillLeavesBookUntouched) {
     EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(151)), Quantity(5));
 }
 
+// FNV-1a over every resting order in band, both sides, in FIFO order:
+// side, price, id and quantity per order, plus the best quotes and size.
+// A full snapshot fingerprint, unlike the replay hash (which folds logged
+// commands), so "book untouched" can be asserted as one equality.
+uint64_t bookStateHash(const OrderBook &book) {
+    constexpr uint64_t FNV_OFFSET_BASIS = 0xCBF29CE484222325ULL;
+    constexpr uint64_t FNV_PRIME = 0x100000001B3ULL;
+    uint64_t hash = FNV_OFFSET_BASIS;
+    const auto mix = [&hash](const uint64_t value) {
+        for (int i = 0; i < 8; ++i) {
+            hash ^= (value >> (8 * i)) & 0xFF;
+            hash *= FNV_PRIME;
+        }
+    };
+    for (const Side side : {Side::Buy, Side::Sell}) {
+        for (int64_t ticks = BAND_MIN; ticks <= BAND_MAX; ++ticks) {
+            for (const OrderNode *node = book.levelFront(side, Ticks(ticks)); node != nullptr; node = node->next) {
+                mix(static_cast<uint64_t>(side));
+                mix(static_cast<uint64_t>(ticks));
+                mix(node->order_id);
+                mix(node->quantity);
+            }
+        }
+    }
+    const std::optional<Ticks> best_bid = book.bestBid();
+    const std::optional<Ticks> best_ask = book.bestAsk();
+    mix(best_bid.has_value() ? static_cast<uint64_t>(best_bid->getValue()) : 0);
+    mix(best_ask.has_value() ? static_cast<uint64_t>(best_ask->getValue()) : 0);
+    mix(book.size());
+    return hash;
+}
+
+// Two-sided book with depth beyond the inside, used by the FOK/IOC
+// untouched-book checks: asks 150x5, 150x5, 152x10, 155x20; bids 148x5,
+// 147x10, 145x20.
+void seedTwoSidedBook(OrderBook &book) {
+    book.insert(makeOrder(1, 150, 5, Side::Sell));
+    book.insert(makeOrder(2, 150, 5, Side::Sell));
+    book.insert(makeOrder(3, 152, 10, Side::Sell));
+    book.insert(makeOrder(4, 155, 20, Side::Sell));
+    book.insert(makeOrder(5, 148, 5, Side::Buy));
+    book.insert(makeOrder(6, 147, 10, Side::Buy));
+    book.insert(makeOrder(7, 145, 20, Side::Buy));
+}
+
+TEST(MatchingEngine, BookStateHashSeesSingleLotChange) {
+    // Guards the helper itself: if it missed changes, every "hash
+    // unchanged" assertion below would pass vacuously.
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+    const uint64_t before = bookStateHash(book);
+    engine.submit(makeTyped(100, 150, 1, Side::Buy, OrderType::IOC));
+    EXPECT_NE(bookStateHash(book), before);
+}
+
+// --- Market ---
+
+TEST(MatchingEngine, MarketOnEmptyBookCancelsWholeOrder) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+
+    SubmitResult result = engine.submit(makeTyped(1, 150, 10, Side::Buy, OrderType::Market));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(10));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(book.size(), 0U);
+    EXPECT_FALSE(book.bestBid().has_value()); // price field would have rested a limit here
+}
+
+TEST(MatchingEngine, MarketExactFillIsFilled) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 150, 20, Side::Buy, OrderType::Market));
+    EXPECT_EQ(result.status, SubmitStatus::Filled);
+    ASSERT_EQ(result.trades.size(), 3U);
+    expectTrade(result.trades[0], 1, 100, 150, 5, Side::Buy);
+    expectTrade(result.trades[1], 2, 100, 150, 5, Side::Buy);
+    expectTrade(result.trades[2], 3, 100, 152, 10, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(0));
+    EXPECT_EQ(book.bestAsk(), Ticks(155));
+}
+
+TEST(MatchingEngine, MarketSellSweepsBidsBestFirstAndCancelsRemainder) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 200, 40, Side::Sell, OrderType::Market));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    ASSERT_EQ(result.trades.size(), 3U);
+    expectTrade(result.trades[0], 5, 100, 148, 5, Side::Sell);
+    expectTrade(result.trades[1], 6, 100, 147, 10, Side::Sell);
+    expectTrade(result.trades[2], 7, 100, 145, 20, Side::Sell);
+    EXPECT_EQ(result.remaining, Quantity(5));
+    EXPECT_FALSE(book.bestBid().has_value());
+    EXPECT_EQ(book.bestAsk(), Ticks(150)); // remainder did not rest as an ask
+    EXPECT_EQ(book.size(), 4U);
+}
+
+// --- IOC ---
+
+TEST(MatchingEngine, IocNoCrossCancelsWithBookUntouched) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+    const uint64_t before = bookStateHash(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 149, 10, Side::Buy, OrderType::IOC));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(10));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(bookStateHash(book), before);
+}
+
+TEST(MatchingEngine, IocFullFillIsFilled) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 152, 15, Side::Buy, OrderType::IOC));
+    EXPECT_EQ(result.status, SubmitStatus::Filled);
+    ASSERT_EQ(result.trades.size(), 3U);
+    expectTrade(result.trades[2], 3, 100, 152, 5, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(0));
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(152)), Quantity(5));
+}
+
+TEST(MatchingEngine, IocSellStopsAtLimitAndCancelsRemainder) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 147, 30, Side::Sell, OrderType::IOC));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    ASSERT_EQ(result.trades.size(), 2U);
+    expectTrade(result.trades[0], 5, 100, 148, 5, Side::Sell);
+    expectTrade(result.trades[1], 6, 100, 147, 10, Side::Sell);
+    EXPECT_EQ(result.remaining, Quantity(15));
+    EXPECT_EQ(book.bestBid(), Ticks(145)); // 145 is beyond the limit: untouched
+    EXPECT_EQ(book.levelQuantity(Side::Buy, Ticks(145)), Quantity(20));
+    EXPECT_EQ(book.bestAsk(), Ticks(150)); // remainder did not rest as an ask
+}
+
+// --- FOK ---
+
+TEST(MatchingEngine, FokWithSurplusFillsAndLeavesRestOfLastLevel) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 155, 25, Side::Buy, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Filled);
+    ASSERT_EQ(result.trades.size(), 4U);
+    expectTrade(result.trades[3], 4, 100, 155, 5, Side::Buy);
+    EXPECT_EQ(result.remaining, Quantity(0));
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(155)), Quantity(15));
+}
+
+TEST(MatchingEngine, FokKillLeavesBookStateHashUnchanged) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+    const uint64_t before = bookStateHash(book);
+
+    // 20 available at or below 152; ask for 21.
+    SubmitResult result = engine.submit(makeTyped(100, 152, 21, Side::Buy, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(21));
+    EXPECT_EQ(result.resting, nullptr);
+    EXPECT_EQ(bookStateHash(book), before);
+}
+
+TEST(MatchingEngine, FokKilledWhenDepthExistsOnlyBeyondLimit) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+    const uint64_t before = bookStateHash(book);
+
+    // Whole ask side (40) would cover 30, but only 10 is at or below 150.
+    SubmitResult result = engine.submit(makeTyped(100, 150, 30, Side::Buy, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(bookStateHash(book), before);
+}
+
+TEST(MatchingEngine, FokSellKillLeavesBookStateHashUnchanged) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+    const uint64_t before = bookStateHash(book);
+
+    // 15 available at or above 147; ask for 16.
+    SubmitResult result = engine.submit(makeTyped(100, 147, 16, Side::Sell, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(16));
+    EXPECT_EQ(bookStateHash(book), before);
+}
+
+TEST(MatchingEngine, FokSellExactFillIsFilled) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+    seedTwoSidedBook(book);
+
+    SubmitResult result = engine.submit(makeTyped(100, 147, 15, Side::Sell, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Filled);
+    ASSERT_EQ(result.trades.size(), 2U);
+    expectTrade(result.trades[0], 5, 100, 148, 5, Side::Sell);
+    expectTrade(result.trades[1], 6, 100, 147, 10, Side::Sell);
+    EXPECT_EQ(book.bestBid(), Ticks(145));
+}
+
+TEST(MatchingEngine, FokOnEmptyBookKilled) {
+    OrderBook book = makeBook();
+    MatchingEngine engine(book);
+
+    SubmitResult result = engine.submit(makeTyped(1, 150, 10, Side::Buy, OrderType::FOK));
+    EXPECT_EQ(result.status, SubmitStatus::Cancelled);
+    EXPECT_TRUE(result.trades.empty());
+    EXPECT_EQ(result.remaining, Quantity(10));
+    EXPECT_EQ(book.size(), 0U);
+}
+
 // Differential test (SPA-7): a narrow price band forces heavy crossing, and
 // every submit is checked trade-for-trade against NaiveMatcher, plus the
 // resulting best bid/ask. Stops at the first divergence via ASSERT so a
