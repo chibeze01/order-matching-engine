@@ -172,6 +172,31 @@ const OrderNode *OrderBook::levelFront(const Side side, const Ticks price) const
     return level != nullptr ? level->head : nullptr;
 }
 
+Quantity OrderBook::crossingQuantity(const Side side, const Ticks limit, const Quantity cap) const {
+    const int64_t limit_ticks = limit.getValue();
+    const uint64_t wanted = cap.getValue();
+    uint64_t total = 0;
+    if (side == Side::Sell) { // asks cross a buy limited at or above them: walk upward
+        if (best_ask_index == NO_LEVEL || limit_ticks < min_tick) {
+            return Quantity(0);
+        }
+        const std::size_t last = indexOf(std::min(limit_ticks, max_tick));
+        for (std::size_t i = best_ask_index; i <= last && total < wanted; ++i) {
+            total += asks[i].total_quantity;
+        }
+    } else { // bids cross a sell limited at or below them: walk downward
+        if (best_bid_index == NO_LEVEL || limit_ticks > max_tick) {
+            return Quantity(0);
+        }
+        const std::size_t last = indexOf(std::max(limit_ticks, min_tick));
+        for (std::size_t i = best_bid_index + 1; i > last && total < wanted;) { // underflow-safe
+            --i;
+            total += bids[i].total_quantity;
+        }
+    }
+    return Quantity(std::min(total, wanted));
+}
+
 const OrderBook::Level *OrderBook::levelAt(const Side side, const Ticks price) const {
     const int64_t ticks = price.getValue();
     if (!inBand(ticks)) {
