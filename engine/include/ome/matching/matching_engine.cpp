@@ -45,13 +45,14 @@ SubmitResult MatchingEngine::submit(const Order &order) {
         // Pre-check, not rollback: a kill must leave the book untouched, so
         // nothing is consumed unless the whole quantity is known to cross.
         if (book.crossingQuantity(restingSide(order.side), limit, order.quantity) < order.quantity) {
-            return SubmitResult{{}, nullptr, order.quantity};
+            return SubmitResult{{}, nullptr, order.quantity, SubmitStatus::Cancelled};
         }
         remaining = match(order, limit, trades);
         break;
     }
     // Market, IOC and FOK never rest: any remainder is cancelled here.
-    return SubmitResult{std::move(trades), nullptr, Quantity(remaining)};
+    const SubmitStatus status = remaining == 0 ? SubmitStatus::Filled : SubmitStatus::Cancelled;
+    return SubmitResult{std::move(trades), nullptr, Quantity(remaining), status};
 }
 
 SubmitResult MatchingEngine::submitLimit(const Order &order) {
@@ -61,8 +62,10 @@ SubmitResult MatchingEngine::submitLimit(const Order &order) {
     // Quantity's const member has no assignment operator (see quantity.hpp),
     // so the result is built once here rather than mutated field-by-field.
     OrderNode *resting = nullptr;
+    SubmitStatus status = SubmitStatus::Filled;
     if (remaining > 0) {
         resting = book.insert(Order{order.id, order.price, Quantity(remaining), order.side, order.type});
+        status = resting != nullptr ? SubmitStatus::Rested : SubmitStatus::RestRejected;
     }
-    return SubmitResult{std::move(trades), resting, Quantity(remaining)};
+    return SubmitResult{std::move(trades), resting, Quantity(remaining), status};
 }

@@ -9,15 +9,25 @@
 #include <optional>
 #include <vector>
 
-// Result of submitting an order. remaining is the quantity left unmatched:
-// 0 means fully filled. For a limit order, remaining > 0 with resting ==
-// nullptr means the leftover was rejected trying to rest (out-of-band price
-// or exhausted pool) rather than matched away. Market, IOC and FOK orders
-// never rest, so for them remaining > 0 is always a cancelled remainder.
+// What happened to an order's unmatched quantity. Every submit ends in
+// exactly one status, reported after its trades: fills first, then the
+// final disposition.
+//   Filled       -- remaining == 0, nothing left over.
+//   Rested       -- limit order's remainder now rests; resting is its handle.
+//   Cancelled    -- Market/IOC remainder, or a whole FOK that was killed.
+//                   Never rests, by design of the order type.
+//   RestRejected -- limit order's remainder could not rest (out-of-band
+//                   price or exhausted pool): a book limit, not a choice.
+enum class SubmitStatus : uint8_t { Filled, Rested, Cancelled, RestRejected };
+
+// Result of submitting an order. remaining is the quantity left unmatched;
+// status says what became of it. resting is non-null only when status is
+// Rested.
 struct SubmitResult {
     std::vector<Trade> trades;
     OrderNode *resting = nullptr;
     Quantity remaining{0};
+    SubmitStatus status = SubmitStatus::Filled;
 };
 
 // Matches incoming orders against an OrderBook at price-time priority.
