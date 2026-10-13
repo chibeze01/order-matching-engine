@@ -149,3 +149,49 @@ so it explores fresh ground each run, always printing the seed first —
 `mt19937_64`'s seed-deterministic, prefix-stable stream means rerunning with
 `--seed` reproduces the exact failing sequence, so a failure doesn't need
 its own persisted log the way a production replay would.
+
+## Market, IOC and FOK orders
+
+One entry point, `MatchingEngine::submit`, dispatches on `OrderType`. All
+four types share a single fill loop (`match`): walk the far side from best,
+FIFO within each level, trade at the maker's price. They differ only in the
+price limit handed to that loop and in what happens to the remainder.
+
+| Type   | Price limit       | Remainder       |
+|--------|-------------------|-----------------|
+| Limit  | `order.price`     | rests           |
+| Market | none              | cancelled       |
+| IOC    | `order.price`     | cancelled       |
+| FOK    | `order.price`     | none — all or nothing |
+
+**Market orders never rest and ignore `order.price`.** A market order walks
+the far side until it is filled or the side is empty; whatever is left is
+cancelled. Resting it would need a price it does not have, and inventing one
+(last trade, far touch) quietly turns it into a limit order. The `price`
+field is left in `Order` rather than made optional: one type for every order
+keeps the hot path and the replay log simple, and a field the engine ignores
+is cheaper than threading `std::optional` through every caller. There is no
+protection band yet, so a large market order will sweep as deep as the book
+goes — the simulator sizes its orders, the engine does not second-guess them.
+
+**FOK is a pre-check, not a rollback.** Before touching anything, FOK asks
+the book how much quantity crosses its limit
+(`OrderBook::crossingQuantity`), and only runs the fill loop if that covers
+the whole order. The alternative — fill, then undo on shortfall — would have
+to restore consumed nodes to their original queue positions, re-insert them
+into the cancel index and recompute best quotes, all of which is easy to get
+subtly wrong and impossible to make cheap. The pre-check is read-only, walks
+at most the levels the fill would have walked anyway, stops as soon as it
+has seen enough, and clamps the limit to the band so a far-off price cannot
+turn it into a full-ladder scan. A killed FOK leaves the book bit-for-bit
+unchanged, which the tests assert with a full-book state hash.
+
+**Every submit ends in exactly one status.** `SubmitResult` carries the
+trades in execution order, then a `SubmitStatus` saying what became of the
+unmatched quantity: `Filled` (nothing left), `Rested` (limit remainder on the
+book), `Cancelled` (Market/IOC remainder or a killed FOK — by design of the
+order type) or `RestRejected` (a limit remainder the book refused: out of
+band or pool exhausted — a capacity limit, not a choice). Without the
+status, those last two would both read as `remaining > 0 && resting ==
+nullptr`, and a caller could only tell them apart by re-checking the type.
+Fills-then-status is the ordering the event stream (SPA-10) will emit.

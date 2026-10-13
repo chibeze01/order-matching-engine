@@ -74,6 +74,13 @@ class OrderBook {
     std::size_t levelOrderCount(Side side, Ticks price) const;
     const OrderNode *levelFront(Side side, Ticks price) const; // FIFO head; walk ->next
 
+    // Resting quantity on side that a taker limited at limit would cross,
+    // walked from side's best level toward limit and capped at cap (the walk
+    // stops as soon as cap is reached). limit is clamped to the band, so a
+    // far-off price never scans beyond it. Read-only: the FOK pre-check uses
+    // it to decide fill-or-kill before mutating anything.
+    Quantity crossingQuantity(Side side, Ticks limit, Quantity cap) const;
+
     std::size_t size() const { return resting_count; }
     std::size_t capacity() const { return node_storage.size(); }
 
