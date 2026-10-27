@@ -25,13 +25,14 @@ struct OrderNode {
     OrderNode *next = nullptr; // doubles as the free-list link when pooled
 };
 
-// Result of consumeBestFront: what got taken off the front order, and
-// whether that order left the book (fully filled) or is still resting with
-// quantity left.
+// Result of consumeBestFront: what got taken off the front order, what it
+// still has resting, and whether it left the book (fully filled) or is still
+// resting with quantity left.
 struct ConsumeResult {
     OrderId order_id;
     Ticks price;
     Quantity filled;
+    Quantity remaining;
     bool order_fully_filled;
 };
 
@@ -58,6 +59,11 @@ class OrderBook {
     // resting (unknown, already cancelled, or already removed).
     bool cancel(OrderId id);
 
+    // O(1) index lookup: the resting order's handle, or nullptr if the id is
+    // not resting. Lets a caller read an order's side/price/quantity before
+    // removing it.
+    OrderNode *find(OrderId id);
+
     // Fills up to max_qty against the front order of side's best level.
     // Precondition: that best level is non-empty (check bestBid()/bestAsk()
     // first) -- the matching engine only calls this while there is a level
@@ -65,6 +71,8 @@ class OrderBook {
     // from the cancel index same as remove(); a partial fill stays at the
     // head of its level with its quantity reduced.
     ConsumeResult consumeBestFront(Side side, Quantity max_qty);
+
+    bool inBand(Ticks price) const { return inBand(price.getValue()); }
 
     std::optional<Ticks> bestBid() const;
     std::optional<Ticks> bestAsk() const;

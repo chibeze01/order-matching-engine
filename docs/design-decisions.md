@@ -195,3 +195,53 @@ band or pool exhausted — a capacity limit, not a choice). Without the
 status, those last two would both read as `remaining > 0 && resting ==
 nullptr`, and a caller could only tell them apart by re-checking the type.
 Fills-then-status is the ordering the event stream (SPA-10) will emit.
+
+## Event stream v1
+
+The full wire format is in `docs/event-stream.md`; this is why it looks the
+way it does.
+
+**Every delta is self-sufficient for a price-level book.** `OrderCancelled`
+carries price and quantity, `OrderReplaced` carries old and new price and
+quantity, `OrderExecuted` carries price and the maker's remaining quantity.
+ITCH leaves most of that out and expects the reader to track every order by
+id. Our two real-time consumers don't want to: the visualiser starts from a
+level-aggregated `BookSnapshot` and has no order ids to look anything up by.
+A few bytes per message buys a consumer that is a straight add/subtract on
+levels.
+
+**`OrderExecuted` and `TradeExecuted` are both sent per fill.** One is the
+book's view (which resting order lost how much), the other is the tape's.
+They overlap, but a consumer that wants only trades (trade-sign and
+return-distribution analysis, a trades panel) filters one type code instead
+of reconstructing trades from book updates. Linked by `match_id`.
+
+**A replace that would cross is not an `OrderReplaced`.** It is sent as a
+cancel followed by an ordinary submit. `OrderReplaced` then always means
+"remove here, rest there" with no trading in between, so a consumer can
+apply it blind. Replacement always loses time priority, even at the same
+price with less quantity: simplest rule, same as ITCH's Order Replace.
+
+**Snapshots don't take a sequence number.** A snapshot is built per
+consumer (each new WebSocket client gets its own), so if it took a number,
+sequence numbers would differ between consumers of the same stream. Instead
+it carries the seq of the last delta it reflects, and the joiner applies
+everything after that.
+
+**The timestamp is an input, not a clock read.** The engine stamps whatever
+time the caller last set (simulation time from the simulator, recorded time
+from replay). Reading a clock inside the engine would make the same input
+produce different bytes, and the golden-file test and replay determinism
+both depend on it not doing that.
+
+**Fixed buffer, overflow is fatal.** Emission writes into a buffer allocated
+once at construction and drained by the owner between engine calls, so the
+hot path never allocates. When the buffer runs out, the writer stops and
+latches an overflow flag rather than growing, blocking or dropping silently:
+a stream with a hole in it is worse than one that visibly broke, and the
+fix is sizing the buffer, not handling it at runtime.
+
+**Length-prefixed messages, version in the stream header.** Each message
+carries its own length so an old reader can skip type codes added after it
+was written; that is what makes "additive only" after the freeze actually
+work. The format version lives once in the stream header, not per message.

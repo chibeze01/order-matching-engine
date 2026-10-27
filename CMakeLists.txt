@@ -45,6 +45,8 @@ add_library(ome_core STATIC
         engine/include/ome/types/price_quantity_math.cpp
         engine/include/ome/book/order_book.cpp
         engine/include/ome/matching/matching_engine.cpp
+        engine/include/ome/events/event_format.cpp
+        engine/include/ome/events/event_writer.cpp
         engine/include/ome/replay/log_format.cpp
         engine/include/ome/replay/log_writer.cpp
         engine/include/ome/replay/log_reader.cpp
@@ -74,8 +76,10 @@ if (OME_BUILD_TESTS)
     target_include_directories(ome_fuzz_support PUBLIC engine/tests/support)
     target_link_libraries(ome_fuzz_support PUBLIC ome_core)
 
-    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp engine/tests/test_matching_engine.cpp)
+    add_executable(ome_core_tests engine/tests/test_smoke.cpp engine/tests/test_ticks.cpp engine/tests/test_price.cpp engine/tests/test_quantity.cpp engine/tests/test_price_quantity_math.cpp engine/tests/test_order_book.cpp engine/tests/test_order_book_cancel.cpp engine/tests/test_order_book_no_alloc.cpp engine/tests/test_order_book_property.cpp engine/tests/test_rng.cpp engine/tests/test_input_log.cpp engine/tests/test_replay.cpp engine/tests/test_matching_engine.cpp engine/tests/test_event_stream.cpp)
     target_link_libraries(ome_core_tests PRIVATE ome_core ome_fuzz_support GTest::gtest_main)
+    # Event stream golden files (SPA-10): byte-exact expected output, read by path.
+    target_compile_definitions(ome_core_tests PRIVATE OME_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/engine/tests/golden")
     gtest_discover_tests(ome_core_tests)
 
     # Standalone fuzz runner: large-scale (1M+ op) invariant fuzzing, run
