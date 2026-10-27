@@ -94,6 +94,11 @@ bool OrderBook::cancel(const OrderId id) {
     return true;
 }
 
+OrderNode *OrderBook::find(const OrderId id) {
+    const std::size_t slot = handleFind(id.getValue());
+    return slot == NOT_FOUND ? nullptr : handle_map[slot].node;
+}
+
 ConsumeResult OrderBook::consumeBestFront(const Side side, const Quantity max_qty) {
     const std::size_t index = side == Side::Buy ? best_bid_index : best_ask_index;
     Level &level = ladder(side)[index];
@@ -102,7 +107,7 @@ ConsumeResult OrderBook::consumeBestFront(const Side side, const Quantity max_qt
     const uint64_t available = front->quantity;
     const uint64_t filled = std::min(available, max_qty.getValue());
     const ConsumeResult result{OrderId(front->order_id), Ticks(front->price_ticks), Quantity(filled),
-                               filled == available};
+                               Quantity(available - filled), filled == available};
 
     front->quantity -= filled;
     level.total_quantity -= filled;

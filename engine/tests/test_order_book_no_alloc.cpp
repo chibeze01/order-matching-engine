@@ -1,9 +1,11 @@
 // Verifies the OrderBook hot path (insert, remove, best-quote reads, level
-// iteration) performs no heap allocation. Global operator new/delete are
-// replaced binary-wide with counting versions; this must be the only TU that
-// defines them.
+// iteration) and event emission perform no heap allocation. Global operator
+// new/delete are replaced binary-wide with counting versions; this must be
+// the only TU that defines them.
 
 #include "ome/book/order_book.hpp"
+#include "ome/events/event_writer.hpp"
+#include "ome/matching/matching_engine.hpp"
 #include "ome/types/order.hpp"
 
 #include <gtest/gtest.h>
@@ -143,6 +145,40 @@ TEST(OrderBookNoAlloc, HotPathDoesNotAllocate) {
     EXPECT_TRUE(cancel_ok);
     EXPECT_TRUE(double_cancel_rejected);
     EXPECT_TRUE(emptied);
+}
+
+TEST(EventWriterNoAlloc, EmissionDoesNotAllocate) {
+#if !OME_ALLOC_COUNTING
+    GTEST_SKIP() << "global operator new replacement collides with the Windows ASan runtime";
+#endif
+    OrderBook book(Ticks(100), Ticks(200), 8); // construction may allocate; emission below must not
+    EventWriter writer(EventStreamHeader{EVENT_STREAM_VERSION, 1, 100, 200}, 4096);
+    MatchingEngine engine(book, &writer);
+
+    const std::size_t allocations_before = allocation_count;
+
+    // Engine paths that emit without trading: submitLimit's trade vector
+    // stays empty, so these exercise emission alone. Fills go through the
+    // writer directly, since SubmitResult's trade vector allocates by itself.
+    writer.setTimestamp(1);
+    engine.submitLimit(makeOrder(1, 150, 10, Side::Buy));                                          // OrderAdded
+    engine.submitLimit(makeOrder(2, 160, 10, Side::Sell));                                         // OrderAdded
+    const bool replaced = engine.replace(OrderId(1), makeOrder(3, 149, 5, Side::Buy)).has_value(); // OrderReplaced
+    const bool cancelled = engine.cancel(OrderId(2));                                              // OrderCancelled
+    writer.orderExecuted(OrderExecutedEvent{3, 4, 0, 149, 2, 3, Side::Sell}); // OrderExecuted + TradeExecuted
+    writer.bookSnapshot(book);                                                // BookSnapshot
+    const std::size_t bytes_written = writer.size();
+    writer.clear();
+
+    const std::size_t allocations_after = allocation_count;
+
+    EXPECT_EQ(allocations_after, allocations_before);
+    EXPECT_TRUE(replaced);
+    EXPECT_TRUE(cancelled);
+    EXPECT_FALSE(writer.overflowed());
+    EXPECT_EQ(bytes_written, EVENT_STREAM_HEADER_SIZE + 2 * ORDER_ADDED_SIZE + ORDER_REPLACED_SIZE +
+                                 ORDER_CANCELLED_SIZE + ORDER_EXECUTED_SIZE + TRADE_EXECUTED_SIZE +
+                                 BOOK_SNAPSHOT_FIXED_SIZE + SNAPSHOT_LEVEL_SIZE);
 }
 
 } // namespace
