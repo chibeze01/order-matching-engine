@@ -410,6 +410,7 @@ TEST(MatchingEngineEvents, NonCrossingReplaceEmitsOrderReplacedAndLosesPriority)
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->trades.empty());
     ASSERT_NE(result->resting, nullptr);
+    EXPECT_EQ(result->status, SubmitStatus::Rested);
     EXPECT_EQ(book.find(OrderId(1)), nullptr);
     EXPECT_EQ(book.levelFront(Side::Buy, Ticks(150))->order_id, 2U); // replacement went to the back
     EXPECT_EQ(book.levelQuantity(Side::Buy, Ticks(150)), Quantity(13));

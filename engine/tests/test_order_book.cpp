@@ -216,4 +216,70 @@ TEST(OrderBook, LevelReadsOutsideBandReportEmpty) {
     EXPECT_EQ(book.levelFront(Side::Buy, Ticks(BAND_MAX + 1)), nullptr);
 }
 
+TEST(OrderBook, CrossingQuantityOnEmptySideIsZero) {
+    OrderBook book = makeBook();
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(BAND_MAX), Quantity(100)), Quantity(0));
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(BAND_MIN), Quantity(100)), Quantity(0));
+}
+
+TEST(OrderBook, CrossingQuantitySumsAsksUpToLimit) {
+    OrderBook book = makeBook();
+    book.insert(makeOrder(1, 150, 10, Side::Sell));
+    book.insert(makeOrder(2, 150, 5, Side::Sell));
+    book.insert(makeOrder(3, 152, 20, Side::Sell));
+    book.insert(makeOrder(4, 155, 40, Side::Sell));
+
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(149), Quantity(1000)), Quantity(0)); // below best ask
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(150), Quantity(1000)), Quantity(15));
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(154), Quantity(1000)), Quantity(35)); // gap levels add 0
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(155), Quantity(1000)), Quantity(75));
+}
+
+TEST(OrderBook, CrossingQuantitySumsBidsDownToLimit) {
+    OrderBook book = makeBook();
+    book.insert(makeOrder(1, 150, 10, Side::Buy));
+    book.insert(makeOrder(2, 148, 20, Side::Buy));
+    book.insert(makeOrder(3, 145, 40, Side::Buy));
+
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(151), Quantity(1000)), Quantity(0)); // above best bid
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(150), Quantity(1000)), Quantity(10));
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(146), Quantity(1000)), Quantity(30));
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(145), Quantity(1000)), Quantity(70));
+}
+
+TEST(OrderBook, CrossingQuantityIsCappedAtCap) {
+    OrderBook book = makeBook();
+    book.insert(makeOrder(1, 150, 10, Side::Sell));
+    book.insert(makeOrder(2, 151, 20, Side::Sell));
+
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(151), Quantity(25)), Quantity(25));
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(151), Quantity(30)), Quantity(30));
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(151), Quantity(31)), Quantity(30));
+}
+
+TEST(OrderBook, CrossingQuantityClampsLimitToBand) {
+    OrderBook book = makeBook();
+    book.insert(makeOrder(1, BAND_MAX, 10, Side::Sell));
+    book.insert(makeOrder(2, BAND_MIN, 20, Side::Buy));
+
+    // Limits far past the band reach the edge level and stop there.
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(BAND_MAX + 1000), Quantity(100)), Quantity(10));
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(0), Quantity(100)), Quantity(20));
+    // Limits wholly on the far side of the band cross nothing.
+    EXPECT_EQ(book.crossingQuantity(Side::Sell, Ticks(BAND_MIN - 1), Quantity(100)), Quantity(0));
+    EXPECT_EQ(book.crossingQuantity(Side::Buy, Ticks(BAND_MAX + 1), Quantity(100)), Quantity(0));
+}
+
+TEST(OrderBook, CrossingQuantityLeavesBookUntouched) {
+    OrderBook book = makeBook();
+    book.insert(makeOrder(1, 150, 10, Side::Sell));
+    book.insert(makeOrder(2, 151, 20, Side::Sell));
+
+    book.crossingQuantity(Side::Sell, Ticks(151), Quantity(100));
+    EXPECT_EQ(book.size(), 2U);
+    EXPECT_EQ(book.bestAsk(), Ticks(150));
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(150)), Quantity(10));
+    EXPECT_EQ(book.levelQuantity(Side::Sell, Ticks(151)), Quantity(20));
+}
+
 } // namespace
